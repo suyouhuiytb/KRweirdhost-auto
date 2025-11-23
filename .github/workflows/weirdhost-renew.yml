@@ -1,12 +1,12 @@
-name: WeirdHost 自动续期
+name: WeirdHost 自动续期 + TG通知
 
 on:
-  workflow_dispatch:                  # 手动触发
+  workflow_dispatch:
   schedule:
-    - cron: '0 15 * * *'              # 每天韩国时间 00:00 运行（UTC 15:00）
+    - cron: '0 15 * * *'    # 每天 UTC 15:00 = 韩国时间 00:00
 
 jobs:
-  renew-server:
+  renew:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,8 +19,10 @@ jobs:
       - name: 安装依赖
         run: pip install requests beautifulsoup4
 
-      - name: 执行续期脚本
+      - name: 执行续期并发送TG通知
         env:
-          WH_USERNAME: ${{ secrets.WH_USERNAME }}   # 你要设置的变量1
-          WH_PASSWORD: ${{ secrets.WH_PASSWORD }}   # 你要设置变量2
+          WH_USERNAME: ${{ secrets.WH_USERNAME }}
+          WH_PASSWORD: ${{ secrets.WH_PASSWORD }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python renew.py
