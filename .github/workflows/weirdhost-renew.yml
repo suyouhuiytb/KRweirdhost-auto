@@ -1,25 +1,34 @@
-name: WeirdHost 韩国 vless 续期（永不被墙）
+name: WeirdHost 韩国 vless 续期（调试加强版）
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 15 * * *'    # 每天 UTC 15:00 = 韩国时间 00:00
+    - cron: '0 15 * * *'
 
 jobs:
   renew:
     runs-on: macos-14
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装 v2ray + Playwright
+      - name: 安装依赖（v2ray + Playwright）
         run: |
-          brew install v2ray
+          # 手动下载 v2ray（brew 可能慢，用 curl 安装）
+          curl -L -o /tmp/v2ray.zip https://github.com/v2fly/v2ray-core/releases/latest/download/v2ray-macos-64.zip
+          unzip /tmp/v2ray.zip -d /tmp/v2ray
+          echo "/tmp/v2ray/v2ray run -c /tmp/vless.json" > /tmp/v2ray-start.sh
+          chmod +x /tmp/v2ray-start.sh
+          
+          # Playwright
+          pip3 install --break-system-packages --upgrade pip
           pip3 install --break-system-packages playwright httpx
+          playwright install --with-deps chromium
 
-      - name: 启动韩国 vless 代理（你的节点）
+      - name: 启动韩国 vless 代理 + 测试
         run: |
+          # 配置 vless JSON
           cat > /tmp/vless.json << 'EOF'
           {
             "inbounds": [{
@@ -42,27 +51,46 @@ jobs:
                 "security": "tls",
                 "tlsSettings": { "serverName": "krr.guizilaban.dpdns.org" },
                 "wsSettings": {
-                  "path": "/vless-argo",
+                  "path": "/vless-argo?ed=2560",
                   "headers": { "Host": "krr.guizilaban.dpdns.org" }
                 }
               }
             }]
           }
           EOF
-          nohup v2ray run -c /tmp/vless.json > /tmp/v2ray.log 2>&1 &
-          echo "vless 已启动，等待 8 秒..."
-          sleep 8
-          curl -x socks5h://127.0.0.1:10809 https://ip.gs -s || echo "代理失败"
+          
+          # 启动 v2ray
+          nohup /tmp/v2ray/v2ray run -c /tmp/vless.json > /tmp/v2ray.log 2>&1 &
+          echo "v2ray PID: $!"
+          sleep 10  # 等启动
+          
+          # 测试代理（检查 IP 是否韩国）
+          echo "测试代理连通性..."
+          PROXY_TEST=$(curl -x socks5h://127.0.0.1:10809 -s https://ipinfo.io/json | grep '"country": "KR"')
+          if [ -n "$PROXY_TEST" ]; then
+            echo "✅ 韩国代理成功！"
+          else
+            echo "❌ 代理失败，日志："
+            cat /tmp/v2ray.log
+            exit 1
+          fi
 
-      - name: 安装 Chromium
-        run: playwright install --with-deps chromium
-
-      - name: 执行续期（走韩国节点）
+      - name: 执行续期脚本（带详细日志）
         env:
           WH_USERNAME: ${{ secrets.WH_USERNAME }}
           WH_PASSWORD: ${{ secrets.WH_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
-          HTTP_PROXY: socks5h://127.0.0.1:10809
-          HTTPS_PROXY: socks5h://127.0.0.1:10809
-        run: python3 renew.py
+        run: |
+          echo "开始运行 renew.py..."
+          python3 renew.py 2>&1 | tee /tmp/script.log
+          echo "脚本日志："
+          cat /tmp/script.log
+
+      - name: 强制发 TG 通知（即使失败）
+        if: always()
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TG_CHAT_ID }}" \
+            -d text="WeirdHost 任务结束。检查 GitHub 日志：https://github.com/你的用户名/你的仓库/actions" \
+            -d parse_mode="HTML"
