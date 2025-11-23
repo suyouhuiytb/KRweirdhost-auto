@@ -13,75 +13,67 @@ async def tg_send(text="", photo=None):
         async with httpx.AsyncClient(timeout=20) as client:
             if photo and os.path.exists(photo):
                 with open(photo, "rb") as f:
-                    await client.post(
-                        f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto",
-                        data={"chat_id": TG_CHAT_ID, "caption": text, "parse_mode": "HTML"},
-                        files={"photo": f}
-                    )
+                    await client.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto",
+                                      data={"chat_id": TG_CHAT_ID, "caption": text, "parse_mode": "HTML"},
+                                      files={"photo": f})
             elif text:
-                await client.post(
-                    f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-                    data={"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "HTML"}
-                )
-    except:
-        pass
+                await client.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+                                  data={"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "HTML"})
+    except: pass
 
 async def main():
     await tg_send("WeirdHost 续期开始运行")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(viewport={"width": 1400, "height": 900})
-        page = await context.new_page()
+        page = await (await browser.new_context(viewport={"width":1400,"height":900})).new_page()
 
         await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
 
         try:
             await page.goto("https://hub.weirdhost.xyz/auth/login", timeout=90000)
-            await page.wait_for_load_state("networkidle", timeout=90_000)
+            await page.wait_for_load_state("networkidle", timeout=90000)
 
-            # 狂点所有确认按钮
-            for txt in ["확인", "Confirm", "OK", "확인하기"]:
-                try:
-                    while await page.get_by_text(txt).count() > 0:
-                        await page.get_by_text(txt).first.click(force=True, timeout=5000)
-                        await asyncio.sleep(1)
-                except: pass
+            # 关键：强制勾选「同意条款和隐私政策」
+            await page.click("text=이용약관 및 개인정보 처리방침에 동의합니다", force=True, timeout=10000)
+            await page.check("input#agree", force=True)  # 保险起见再点一次实际 checkbox
 
-            # 填写账号密码（兼容 username 和 email 两种情况）
-            await page.fill("input[name='username'], input[name='email'], input[type='text']", USERNAME)
-            await page.fill("input[name='password'], input[type='password']", PASSWORD)
-            await page.click("button:has-text('로그인'), button[type='submit']")
-            await asyncio.sleep(8)
+            # 填写账号密码
+            await page.fill("input[name='username'], input[name='email']", USERNAME)
+            await page.fill("input[name='password']", PASSWORD)
 
-            if "dashboard" in page.url or "server" in page.url:
-                await tg_send("登录成功！正在续期")
-                await page.goto("https://hub.weirdhost.xyz/server/80982fa5", timeout=60000)
+            # 点击登录
+            await page.click("button:has-text('로그인')")
+            await asyncio.sleep(6)
 
-                for _ in range(15):
-                    if await page.get_by_text("시간추가").count() > 0:
-                        await page.get_by_text("시간추가").click(force=True)
-                        await asyncio.sleep(3)
-                        break
-                    await asyncio.sleep(1)
+            if "dashboard" not in page.url and "server" not in page.url:
+                await page.screenshot(path="/tmp/login_failed.png", full_page=True)
+                await tg_send("登录还是失败了（附最新截图）", photo="/tmp/login_failed.png")
+                return
 
-                content = await page.content()
-                if "You can't renew" in content:
-                    await tg_send("冷却中\n明天0点会自动成功")
-                elif "시간이 추가되었습니다" in content:
-                    await tg_send("续期成功！")
-                else:
-                    await page.screenshot(path="/tmp/result.png", full_page=True)
-                    await tg_send("未知结果，已附截图", photo="/tmp/result.png")
+            await tg_send("登录成功！正在续期")
+            await page.goto("https://hub.weirdhost.xyz/server/80982fa5", timeout=60000)
+
+            # 点击时间추가
+            await page.wait_for_selector("text=시간추가", timeout=30000)
+            await page.click("text=시간추가")
+
+            await asyncio.sleep(3)
+            content = await page.content()
+
+            if "You can't renew" in content:
+                await tg_send("冷却中\n明天0点会自动成功")
+            elif "시간이 추가되었습니다" in content:
+                await tg_send("续期成功！\n服务器时间已延长")
             else:
-                await page.screenshot(path="/tmp/fail.png", full_page=True)
-                await tg_send("登录失败，已附截图", photo="/tmp/fail.png")
+                await page.screenshot(path="/tmp/result.png", full_page=True)
+                await tg_send("未知结果（附截图）", photo="/tmp/result.png")
 
         except Exception as e:
             await page.screenshot(path="/tmp/error.png", full_page=True)
-            await tg_send(f"脚本出错：{str(e)}\n已附截图", photo="/tmp/error.png")
+            await tg_send(f"脚本异常：{str(e)}\n附截图", photo="/tmp/error.png")
         finally:
-            await context.close()
+            await page.context.close()
             await browser.close()
 
 asyncio.run(main())
