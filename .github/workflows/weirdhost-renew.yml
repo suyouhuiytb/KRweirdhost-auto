@@ -1,29 +1,28 @@
-name: WeirdHost 自动续期（macOS 14 日本免费版）
+name: WeirdHost 自动续期（macOS 14 终极稳定版）
 
 on:
-  workflow_dispatch:  # 手动触发测试
+  workflow_dispatch:
   schedule:
-    - cron: '0 15 * * *'  # 每天韩国时间 00:00
+    - cron: '0 15 * * *'    # 每天韩国时间 00:00
 
 jobs:
   renew:
-    runs-on: macos-14  # 免费！日本东京 IP，完美绕过 Cloudflare
+    runs-on: macos-14         # 免费！日本东京 IP！完美绕过 Cloudflare
     timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装 Playwright 和依赖
+      - name: 安装 Playwright（强制突破系统保护）
         run: |
-          # macOS 14 自带 Python 3.12
-          pip3 install --upgrade pip
-          pip3 install playwright httpx
-          playwright install --with-deps chromium  # macOS 专用，一键安装 deps + browser
+          pip3 install --break-system-packages --upgrade pip
+          pip3 install --break-system-packages playwright httpx
+          playwright install --with-deps chromium
 
       - name: 执行续期脚本
         env:
           WH_USERNAME: ${{ secrets.WH_USERNAME }}
           WH_PASSWORD: ${{ secrets.WH_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
         run: python3 renew.py
