@@ -1,28 +1,25 @@
-name: WeirdHost 自动续期 + TG通知（Playwright版）
+name: WeirdHost 自动续期 + TG通知（终极版）
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 15 * * *'    # 每天韩国时间 00:00
+    - cron: '0 15 * * *'    # 韩国时间 00:00
 
 jobs:
   renew:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-
-      - name: 设置 Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: 安装 Playwright
         run: |
-          pip install playwright
+          pip install playwright httpx
           playwright install-deps chromium
           playwright install chromium
-
-      - name: 执行续期（真实浏览器）
+      - name: 执行续期
         env:
           WH_USERNAME: ${{ secrets.WH_USERNAME }}
           WH_PASSWORD: ${{ secrets.WH_PASSWORD }}
