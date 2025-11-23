@@ -1,92 +1,98 @@
 import os
-import requests
-from bs4 import BeautifulSoup
-import urllib.parse
+import asyncio
+from playwright.async_api import async_playwright
 
-# ========== 配置 ==========
-USERNAME   = os.getenv("WH_USERNAME")
-PASSWORD   = os.getenv("WH_PASSWORD")
-TG_TOKEN   = os.getenv("TG_BOT_TOKEN")
-TG_CHAT_ID = os.getenv("TG_CHAT_ID")
+USERNAME   = os.environ["WH_USERNAME"]
+PASSWORD   = os.environ["WH_PASSWORD"]
+TG_TOKEN   = os.environ["TG_BOT_TOKEN"]
+TG_CHAT_ID = os.environ["TG_CHAT_ID"]
 
-if not all([USERNAME, PASSWORD, TG_TOKEN, TG_CHAT_ID]):
-    print("错误：缺少必要环境变量")
-    exit(1)
-
-login_url  = "https://hub.weirdhost.xyz/auth/login"
-server_url = "https://hub.weirdhost.xyz/server/80982fa5"
-
-session = requests.Session()
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-}
-
-def tg_send(text):
-    """发送Telegram消息（自动转义）"""
+async def tg_send(text):
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TG_CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }
     try:
-        requests.post(url, data=payload, timeout=10)
+        import httpx
+        await httpx.AsyncClient().post(url, data={
+            "chat_id": TG_CHAT_ID,
+            "text": text,
+            "parse_mode": "HTML"
+        }, timeout=10)
     except:
-        pass  # 防止TG失败导致整个任务挂
+        pass
 
-tg_send("WeirdHost 自动续期开始运行")
+async def main():
+    await tg_send("WeirdHost 续期开始（Playwright版）")
 
-# Step 1: 登录（已处理确认/条款复选框）
-login_page = session.get(login_url, headers=headers)
-soup = BeautifulSoup(login_page.text, "html.parser")
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
+        await page.set_viewport_size({"width": 1280, "height": 720})
 
-csrf_token = soup.find("input", {"name": "_token"})["value"] if soup.find("input", {"name": "_token"}) else ""
+        # 关键：伪装指纹，绕过 Cloudflare
+        await page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => false});
+            Object.defineProperty(navigator, 'languages', {get: () => ['ko-KR', 'ko', 'en-US', 'en']});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+        """)
 
-login_data = {
-    "_token": csrf_token,
-    "email": USERNAME,
-    "password": PASSWORD,
-}
+        try:
+            await page.goto("https://hub.weirdhost.xyz/auth/login", wait_until="networkidle", timeout=30000)
 
-# 自动勾选可能的确认复选框
-for cb in soup.find_all("input", {"type": "checkbox"}):
-    name = cb.get("name")
-    if name and any(k in name.lower() for k in ["term","agree","confirm","check"]):
-        login_data[name] = "on"
+            # 1. 如果有 Cloudflare 验证码，等它过（最多等30秒）
+            await page.wait_for_load_state("networkidle")
+            if "Just a moment" in await page.content() or "Checking your browser" in await page.content():
+                print("检测到 Cloudflare，正在自动过...")
+                await page.wait_for_url("**/dashboard**", timeout=60000)  # 最长等60秒
 
-resp = session.post(login_url, data=login_data, headers=headers, allow_redirects=True)
+            # 2. 登录前必须点的“확인”弹窗或按钮（多次点击保险）
+            for _ in range(3):
+                if await page.locator("text=확인").count() > 0:
+                    await page.locator("text=확인").first.click(timeout=5000)
+                if await page.locator("text=Confirm").count() > 0:
+                    await page.locator("text=Confirm").first.click(timeout=5000)
 
-if "dashboard" not in resp.url and "server" not in resp.url:
-    msg = "登录失败！账号密码可能错误或触发验证码"
-    tg_send(f"<b>续期失败</b>\n{msg}")
-    print(msg)
-    exit(1)
+            # 3. 填写账号密码并登录
+            await page.fill("input[name='email']", USERNAME)
+            await page.fill("input[name='password']", PASSWORD)
+            await page.click("button:has-text('Login'), button[type='submit']")
+            await page.wait_for_load_state("networkidle")
 
-tg_send("登录成功，正在尝试续期...")
+            # 4. 判断是否真的登录成功
+            if "dashboard" not in page.url and "server" not in page.url:
+                await tg_send(f"<b>登录失败</b>\n可能是密码错或账号被封")
+                await browser.close()
+                return
 
-# Step 2: 访问服务器页面
-server_page = session.get(server_url, headers=headers)
-soup = BeautifulSoup(server_page.text, "html.parser")
+            await tg_send("登录成功，正在续期...")
 
-# Step 3: 提交续期
-renew_form = soup.find("form", action=lambda x: x and "renew" in x)
-if not renew_form:
-    tg_send("<b>续期失败</b>\n未找到续期表单，服务器可能已过期或页面改版")
-    exit(1)
+            # 5. 进入服务器页面并点击“시간추가”
+            await page.goto("https://hub.weirdhost.xyz/server/80982fa5", wait_until="networkidle")
 
-renew_url = "https://hub.weirdhost.xyz" + renew_form["action"]
-renew_data = {"_token": soup.find("input", {"name": "_token"})["value"]}
+            # 多次尝试点击“시간추가”（可能要等一下才出现）
+            for i in range(10):
+                if await page.locator("text=시간추가").count() > 0:
+                    await page.click("text=시간추가")
+                    break
+                await asyncio.sleep(2)
+            else:
+                await tg_send("<b>未找到“시간추가”按钮</b>\n服务器可能已彻底过期")
+                await browser.close()
+                return
 
-renew_resp = session.post(renew_url, data=renew_data, headers=headers)
+            # 6. 判断结果
+            await asyncio.sleep(3)
+            content = await page.content()
 
-resp_text = renew_resp.text
+            if "You can't renew your server currently" in content:
+                await tg_send("<b>冷却中</b>\n只能一天续一次，明天0点再来就会成功")
+            elif "시간이 추가되었습니다" in content or "successfully" in content.lower():
+                await tg_send("<b>续期成功！</b>\n服务器时间已延长")
+            else:
+                await tg_send(f"<b>未知结果</b>\n请手动检查一下吧\n\n{content[:500]}")
 
-if "You can't renew your server currently" in resp_text:
-    tg_send("<b>冷却中</b>\nYou can't renew your server currently,\nbecause you can only once at one time period.\n\n明天同一时间再试就会成功")
-elif "시간이 추가되었습니다" in resp_text or "successfully" in resp_text.lower():
-    tg_send("<b>续期成功！</b>\n服务器时间已成功延长")
-else:
-    tg_send(f"<b>未知结果，请手动检查</b>\n响应片段：\n<code>{resp_text[:600]}</code>")
+        except Exception as e:
+            await tg_send(f"<b>脚本异常</b>\n{str(e)}")
+            raise
+        finally:
+            await browser.close()
 
-print("任务完成，通知已发送")
+asyncio.run(main())
