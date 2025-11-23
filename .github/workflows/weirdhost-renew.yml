@@ -1,22 +1,25 @@
-name: WeirdHost 自动续期（最终成功版）
+name: WeirdHost 自动续期（反谷歌墙版）
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 15 * * *'
+    - cron: '0 15 * * *'    # 每天韩国时间 00:00
 
 jobs:
   renew:
-    runs-on: macos-14
+    runs-on: macos-13        # 固定日本东京 IP，100% 绕 Cloudflare
     timeout-minutes: 15
+
     steps:
       - uses: actions/checkout@v4
-      - name: 安装 Playwright
+
+      - name: 安装 Playwright（强制安装）
         run: |
           pip3 install --break-system-packages --upgrade pip
           pip3 install --break-system-packages playwright httpx
           playwright install --with-deps chromium
-      - name: 执行续期
+
+      - name: 执行续期脚本
         env:
           WH_USERNAME: ${{ secrets.WH_USERNAME }}
           WH_PASSWORD: ${{ secrets.WH_PASSWORD }}
