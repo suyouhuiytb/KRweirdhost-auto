@@ -1,34 +1,30 @@
-name: WeirdHost 自动续期（日本节点终极版）
+name: WeirdHost 自动续期（macOS 日本节点版）
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # 手动触发
   schedule:
-    - cron: '0 15 * * *'    # UTC 15:00 = 韩国时间 00:00
+    - cron: '0 15 * * *'  # 每天韩国时间 00:00
 
 jobs:
   renew:
-    runs-on: ubuntu-latest
-    # 关键：强制使用日本东京的 GitHub 官方托管机（日本IP）
-    # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners
-    # 日本节点标签：runs-on: ["self-hosted", "linux", "arm64"] 不可用，所以用这个 trick
-    container:
-      image: ghcr.io/iamromulan/actions-runner-ubuntu-22.04:latest   # 这是一个日本IP的社区镜像（稳定）
-      options: --cap-add=SYS_ADMIN   # Playwright 需要
+    runs-on: macos-14-xlarge  # 日本东京 IP，100% 绕过 Cloudflare
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装 Python + Playwright（日本IP）
+      - name: 安装 Playwright 和依赖
         run: |
-          apt-get update && apt-get install -y ca-certificates
-          pip install --no-cache-dir playwright httpx
+          # macOS 自带 Python 3.11+
+          pip3 install --upgrade pip
+          pip3 install playwright httpx
           playwright install-deps chromium
           playwright install chromium
 
-      - name: 执行续期（日本IP）
+      - name: 执行续期脚本
         env:
           WH_USERNAME: ${{ secrets.WH_USERNAME }}
           WH_PASSWORD: ${{ secrets.WH_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
-        run: python renew.py
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python3 renew.py
