@@ -1,4 +1,4 @@
-name: WeirdHost 自动续期（macOS 14 终极稳定版）
+name: WeirdHost 自动续期（必成功版）
 
 on:
   workflow_dispatch:
@@ -7,8 +7,8 @@ on:
 
 jobs:
   renew:
-    runs-on: macos-14         # 免费！日本东京 IP！完美绕过 Cloudflare
-    timeout-minutes: 10
+    runs-on: macos-14         # 免费 + 日本东京 IP
+    timeout-minutes: 12
 
     steps:
       - uses: actions/checkout@v4
@@ -19,10 +19,21 @@ jobs:
           pip3 install --break-system-packages playwright httpx
           playwright install --with-deps chromium
 
-      - name: 执行续期脚本
+      - name: 执行续期脚本 + 失败也发截图
         env:
           WH_USERNAME: ${{ secrets.WH_USERNAME }}
           WH_PASSWORD: ${{ secrets.WH_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
         run: python3 renew.py
+
+      # 脚本崩溃/异常时强制把最后截图发你
+      - name: 失败补刀发截图
+        if: |
+          if [ -f /tmp/last_screenshot.png ]; then
+            curl -F chat_id=$TG_CHAT_ID -F photo=@/tmp/last_screenshot.png \
+              https://api.telegram.org/bot$TG_BOT_TOKEN/sendPhoto -F caption="脚本异常，强制补发最终页面"
+          fi
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
