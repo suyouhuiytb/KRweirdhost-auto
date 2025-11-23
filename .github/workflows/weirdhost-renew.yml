@@ -1,28 +1,68 @@
-name: WeirdHost 自动续期（反谷歌墙版）
+name: WeirdHost 韩国 vless 续期（永不被墙）
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 15 * * *'    # 每天韩国时间 00:00
+    - cron: '0 15 * * *'    # 每天 UTC 15:00 = 韩国时间 00:00
 
 jobs:
   renew:
-    runs-on: macos-13        # 固定日本东京 IP，100% 绕 Cloudflare
+    runs-on: macos-14
     timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装 Playwright（强制安装）
+      - name: 安装 v2ray + Playwright
         run: |
-          pip3 install --break-system-packages --upgrade pip
+          brew install v2ray
           pip3 install --break-system-packages playwright httpx
-          playwright install --with-deps chromium
 
-      - name: 执行续期脚本
+      - name: 启动韩国 vless 代理（你的节点）
+        run: |
+          cat > /tmp/vless.json << 'EOF'
+          {
+            "inbounds": [{
+              "port": 10809,
+              "listen": "127.0.0.1",
+              "protocol": "socks",
+              "settings": {"udp": true}
+            }],
+            "outbounds": [{
+              "protocol": "vless",
+              "settings": {
+                "vnext": [{
+                  "address": "104.16.250.251",
+                  "port": 443,
+                  "users": [{ "id": "8351d6b4-32b9-4dfd-9b58-592fc9ed90ba", "encryption": "none" }]
+                }]
+              },
+              "streamSettings": {
+                "network": "ws",
+                "security": "tls",
+                "tlsSettings": { "serverName": "krr.guizilaban.dpdns.org" },
+                "wsSettings": {
+                  "path": "/vless-argo",
+                  "headers": { "Host": "krr.guizilaban.dpdns.org" }
+                }
+              }
+            }]
+          }
+          EOF
+          nohup v2ray run -c /tmp/vless.json > /tmp/v2ray.log 2>&1 &
+          echo "vless 已启动，等待 8 秒..."
+          sleep 8
+          curl -x socks5h://127.0.0.1:10809 https://ip.gs -s || echo "代理失败"
+
+      - name: 安装 Chromium
+        run: playwright install --with-deps chromium
+
+      - name: 执行续期（走韩国节点）
         env:
           WH_USERNAME: ${{ secrets.WH_USERNAME }}
           WH_PASSWORD: ${{ secrets.WH_PASSWORD }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID:   ${{ secrets.TG_CHAT_ID }}
+          HTTP_PROXY: socks5h://127.0.0.1:10809
+          HTTPS_PROXY: socks5h://127.0.0.1:10809
         run: python3 renew.py
